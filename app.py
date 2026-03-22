@@ -107,7 +107,7 @@ def _traffic_class_matrix_html(enable_urllc: bool, res_normal: dict, res_urllc: 
 
 # ── Session defaults ──
 if "phase" not in st.session_state:
-    st.session_state.phase = "wizard"  # wizard | boot | results
+    st.session_state.phase = "landing"  # landing | wizard | boot | results
 if "wiz_step" not in st.session_state:
     st.session_state.wiz_step = 0
 if "wiz_dur" not in st.session_state:
@@ -125,7 +125,8 @@ st.set_page_config(
 
 
 def _reset_wizard() -> None:
-    st.session_state.phase = "wizard"
+    """Clear results and return to the landing page (full intro flow)."""
+    st.session_state.phase = "landing"
     st.session_state.wiz_step = 0
     for k in ("res_normal", "res_urllc"):
         st.session_state.pop(k, None)
@@ -213,8 +214,7 @@ def _demo_assets():
       </g>
       <text x="383" y="124" text-anchor="middle" class="demo-lbl">Robot</text>
       <path class="beam-norm" d="M 96 88 C 180 42, 260 42, 344 88"/>
-      <text x="220" y="54" text-anchor="middle" class="demo-lat demo-lat--norm">~100+ ms</text>
-      <text x="220" y="66" text-anchor="middle" class="demo-lat-sub">CONTROL LINK (ILLUSTRATIVE)</text>
+      <text x="220" y="72" text-anchor="middle" class="demo-lat-sub">CONTROL LINK (ILLUSTRATIVE)</text>
       <circle class="pkt-norm" r="6">
         <animateMotion dur="4.6s" repeatCount="indefinite" rotate="auto"
           path="M 96 88 C 180 42, 260 42, 344 88"/>
@@ -223,6 +223,7 @@ def _demo_assets():
         <animateMotion dur="3.2s" repeatCount="indefinite" begin="0.8s"
           path="M 96 88 C 180 42, 260 42, 344 88"/>
       </circle>
+      <text x="220" y="152" text-anchor="middle" class="demo-lat demo-lat--norm">~100+ ms</text>
       <text x="220" y="168" text-anchor="middle" class="demo-foot">Higher delay · commands not prioritized</text>
     </svg>
   </div>
@@ -266,12 +267,12 @@ def _demo_assets():
       </g>
       <text x="383" y="124" text-anchor="middle" class="demo-lbl">Robot</text>
       <path class="beam-urllc" d="M 96 88 C 180 42, 260 42, 344 88"/>
-      <text x="220" y="54" text-anchor="middle" class="demo-lat demo-lat--urllc">&lt;1 ms</text>
-      <text x="220" y="66" text-anchor="middle" class="demo-lat-sub">CONTROL LINK (ILLUSTRATIVE)</text>
+      <text x="220" y="72" text-anchor="middle" class="demo-lat-sub">CONTROL LINK (ILLUSTRATIVE)</text>
       <circle class="pkt-urllc" r="7">
         <animateMotion dur="1.35s" repeatCount="indefinite" rotate="auto"
           path="M 96 88 C 180 42, 260 42, 344 88"/>
       </circle>
+      <text x="220" y="152" text-anchor="middle" class="demo-lat demo-lat--urllc">&lt;1 ms</text>
       <text x="220" y="168" text-anchor="middle" class="demo-foot">Lower latency · reliable control channel</text>
     </svg>
   </div>
@@ -293,6 +294,272 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+# ── Shared URLLC landing/wizard radar layer (st.html only — same visuals as landing) ──
+_URLLC_LP_FONT_IMPORT = (
+    "@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Exo+2:wght@300;400;700;800&display=swap');"
+)
+
+_URLLC_LP_SCENE_CSS = """
+/* ── Background gradient ── */
+.lp-bg{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 42%,rgba(0,160,255,.08) 0%,transparent 62%),
+    radial-gradient(ellipse 55% 40% at 80% 80%,rgba(100,60,240,.06) 0%,transparent 50%),
+    linear-gradient(168deg,#060d1f 0%,#03070f 50%,#080518 100%)}
+
+/* ── Ring container ── */
+.lp-rings{position:fixed;inset:0;z-index:1;pointer-events:none;overflow:hidden}
+
+/* ── Rings ── */
+.lp-ring{
+  position:absolute;top:50%;left:50%;
+  width:120px;height:120px;
+  border-radius:50%;
+  border:1.5px solid rgba(0,210,255,.72);
+  transform:translate(-50%,-50%) scale(.08);
+  box-shadow:0 0 10px rgba(0,190,255,.25);
+  animation:ringOut 4.8s ease-out infinite}
+.lp-ring--2{animation-delay:1.2s;border-color:rgba(0,195,255,.6)}
+.lp-ring--3{animation-delay:2.4s;border-color:rgba(0,175,255,.48)}
+.lp-ring--4{animation-delay:3.6s;border-color:rgba(0,155,255,.32)}
+@keyframes ringOut{
+  0%  {transform:translate(-50%,-50%) scale(.08);opacity:.95}
+  100%{transform:translate(-50%,-50%) scale(17);opacity:0}}
+
+/* ── Radar sweep ── */
+.lp-sweep{
+  position:absolute;top:50%;left:50%;
+  width:70vmax;height:70vmax;
+  transform-origin:0% 0%;
+  background:conic-gradient(from 0deg,transparent 268deg,rgba(0,220,255,.055) 360deg);
+  animation:sweepRot 6s linear infinite;z-index:2}
+@keyframes sweepRot{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+
+/* ── Cross-hair ── */
+.lp-cross{position:absolute;inset:0;pointer-events:none}
+.lp-cross::before{content:'';position:absolute;top:50%;left:0;right:0;height:1px;background:rgba(0,200,255,.1)}
+.lp-cross::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(0,200,255,.1)}
+
+/* ── Center dot ── */
+.lp-dot{
+  position:absolute;top:50%;left:50%;
+  width:14px;height:14px;
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  background:rgba(0,220,255,.98);
+  box-shadow:0 0 12px 3px rgba(0,220,255,1),0 0 32px rgba(0,180,255,.55);
+  animation:dotPulse 2s ease-in-out infinite;z-index:3}
+@keyframes dotPulse{
+  0%,100%{transform:translate(-50%,-50%) scale(1);opacity:1}
+  50%    {transform:translate(-50%,-50%) scale(1.55);opacity:.55}}
+
+/* ── Top bar (fixed) ── */
+.lp-topbar{
+  position:fixed;top:0;left:0;right:0;z-index:50;
+  padding:.85rem 1.5rem;display:flex;align-items:center;
+  justify-content:space-between;pointer-events:none;
+  animation:fadeUp .9s ease-out both}
+.lp-topbar-title{
+  font-family:"Rajdhani",system-ui,sans-serif;
+  font-size:clamp(.68rem,1.8vw,.85rem);font-weight:700;
+  letter-spacing:.38em;text-transform:uppercase;color:rgba(0,210,255,.88)}
+.lp-topbar-badge{
+  font-size:.58rem;font-weight:600;letter-spacing:.28em;
+  padding:3px 10px;border-radius:4px;
+  border:1px solid rgba(0,210,255,.35);color:rgba(0,210,255,.65)}
+"""
+
+_URLLC_LP_SCENE_HTML = """
+<div class="lp-bg"></div>
+<div class="lp-rings">
+  <div class="lp-cross"></div>
+  <div class="lp-sweep"></div>
+  <div class="lp-ring lp-ring--1"></div>
+  <div class="lp-ring lp-ring--2"></div>
+  <div class="lp-ring lp-ring--3"></div>
+  <div class="lp-ring lp-ring--4"></div>
+  <div class="lp-dot"></div>
+</div>
+<div class="lp-topbar">
+  <span class="lp-topbar-title">URLLC Healthcare Simulation</span>
+  <span class="lp-topbar-badge">SimPy &nbsp;·&nbsp; 5G MODEL</span>
+</div>
+"""
+
+
+def _urllc_lp_chrome_viewport_css(*, wizard: bool) -> str:
+    bc_overflow = (
+        "overflow-y:auto!important;overflow-x:hidden!important"
+        if wizard
+        else "overflow:hidden!important"
+    )
+    return f"""
+header[data-testid="stHeader"],footer,[data-testid="stDecoration"],
+[data-testid="collapsedControl"],section[data-testid="stSidebar"]{{display:none!important}}
+
+html,body{{overflow:hidden!important;height:100%!important;margin:0!important}}
+.stApp{{background:#04091a!important;height:100dvh!important;overflow:hidden!important}}
+.stApp [data-testid="stAppViewContainer"],
+.stApp [data-testid="stAppViewContainer"]>div{{height:100dvh!important;overflow:hidden!important}}
+section.main{{height:100dvh!important;overflow:hidden!important}}
+section.main>div.block-container{{
+  height:100dvh!important;max-height:100dvh!important;{bc_overflow};
+  padding:0!important;max-width:100%!important;box-sizing:border-box!important;
+  background:transparent!important}}
+"""
+
+
+def _urllc_wizard_lp_sthtml() -> str:
+    wiz_layout = """
+/* One scroll parent only: .block-container. Avoid max-height + overflow on this block or the
+   primary button (SIMULATE) sits below the fold behind a harsh native scrollbar. */
+[data-testid="stVerticalBlock"]{
+  min-height:100dvh!important;height:auto!important;
+  display:flex!important;flex-direction:column!important;
+  justify-content:flex-start!important;align-items:center!important;
+  padding:2.5rem 1rem 2.5rem!important;overflow:visible!important;
+  box-sizing:border-box!important;position:relative!important;z-index:15!important}
+[data-testid="stVerticalBlock"]>div{
+  flex:0 0 auto!important;width:100%!important;max-width:100%!important;
+  align-self:stretch!important}
+[data-testid="stHtml"]{height:0!important;overflow:visible!important}
+"""
+    return f"""<style>
+{_URLLC_LP_FONT_IMPORT}
+{_urllc_lp_chrome_viewport_css(wizard=True)}
+{wiz_layout}
+{_URLLC_LP_SCENE_CSS}
+@keyframes fadeUp{{from{{opacity:0}}to{{opacity:1}}}}
+</style>
+{_URLLC_LP_SCENE_HTML}
+"""
+
+
+def _urllc_landing_lp_sthtml() -> str:
+    landing_layout = """
+/* ── Vertical block: full-screen flex column, centered ── */
+[data-testid="stVerticalBlock"]{
+  height:100dvh!important;overflow:hidden!important;
+  display:flex!important;flex-direction:column!important;
+  justify-content:center!important;align-items:center!important;
+  gap:1.75rem!important;padding:3.5rem 1rem 2rem!important;
+  box-sizing:border-box!important;position:relative!important;z-index:10!important}
+[data-testid="stVerticalBlock"]>div{
+  flex:0 0 auto!important;display:flex!important;
+  flex-direction:column!important;align-items:center!important;
+  width:100%!important;max-width:100%!important}
+
+/* ── stHtml wrapper: no in-flow height (all content is fixed) ── */
+[data-testid="stHtml"]{height:0!important;overflow:visible!important}
+
+/* ── stHorizontalBlock (columns): zero out, button is fixed ── */
+[data-testid="stHorizontalBlock"]{height:0!important;overflow:visible!important}
+
+/* ── Headline block: fixed-centered ── */
+.lp-center{
+  position:fixed;top:50%;left:0;right:0;
+  transform:translateY(-55%);
+  z-index:10;display:flex;flex-direction:column;
+  align-items:center;text-align:center;
+  pointer-events:none;
+  animation:riseUp 1s cubic-bezier(.16,1,.3,1) .1s both}
+.lp-headline{
+  font-family:"Exo 2","Rajdhani",system-ui,sans-serif;
+  font-weight:800;font-size:clamp(1.55rem,5.5vw,3rem);
+  line-height:1.1;letter-spacing:-.02em;color:#eef6ff;
+  margin:0}
+.lp-headline .cy{color:#00d4ff;text-shadow:0 0 28px rgba(0,200,255,.35)}
+.lp-sub{
+  font-family:"Exo 2",system-ui,sans-serif;
+  font-size:clamp(.85rem,1.9vw,.98rem);font-weight:300;color:#7bafc8;
+  max-width:30rem;line-height:1.6;margin:.65rem 0 0;
+  animation:fadeUp 1s ease-out .3s both}
+
+/* ── Button: fixed, just below center ── */
+html body .stApp [data-testid="stButton"],
+html body .stApp div.stButton{
+  position:fixed!important;
+  top:calc(50% + 175px)!important;left:50%!important;
+  transform:translateX(-50%)!important;
+  z-index:20!important;width:auto!important}
+
+@keyframes fadeUp{from{opacity:0}to{opacity:1}}
+@keyframes riseUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── ENTER SIMULATION button (beats Streamlit primary theme) ── */
+@keyframes btnGlow{
+  0%,100%{box-shadow:
+    inset 0 0 0 1px rgba(155,220,255,.16),
+    0 0 26px rgba(0,158,255,.46),
+    0 0 60px rgba(0,108,255,.26),
+    0 10px 30px rgba(0,0,0,.52)}
+  50%{box-shadow:
+    inset 0 0 0 1px rgba(200,242,255,.28),
+    0 0 42px rgba(0,208,255,.65),
+    0 0 90px rgba(50,155,255,.38),
+    0 10px 34px rgba(0,0,0,.52)}}
+html body .stApp [data-testid="stButton"]>button,
+html body .stApp div.stButton>button{
+  min-height:3.6rem!important;
+  padding:0 2.5rem!important;min-width:16rem!important;
+  font-family:"Rajdhani","Exo 2",system-ui,sans-serif!important;
+  font-size:1.06rem!important;font-weight:700!important;
+  letter-spacing:.3em!important;text-transform:uppercase!important;
+  color:#dff6ff!important;border-radius:14px!important;
+  border:1px solid rgba(105,200,255,.68)!important;
+  background:linear-gradient(155deg,
+    rgba(0,145,255,.48) 0%,rgba(0,80,222,.32) 50%,rgba(18,48,168,.44) 100%)!important;
+  background-color:rgba(4,20,62,.42)!important;
+  backdrop-filter:blur(20px) saturate(1.5)!important;
+  -webkit-backdrop-filter:blur(20px) saturate(1.5)!important;
+  box-shadow:
+    inset 0 0 0 1px rgba(155,220,255,.16),
+    0 0 26px rgba(0,158,255,.46),
+    0 0 60px rgba(0,108,255,.26),
+    0 10px 30px rgba(0,0,0,.52)!important;
+  animation:btnGlow 2.5s ease-in-out infinite,
+    riseUp .9s cubic-bezier(.16,1,.3,1) .45s both!important;
+  transition:transform .18s ease,filter .18s ease,border-color .18s ease!important;
+  cursor:pointer!important;position:relative!important;z-index:20!important}
+html body .stApp [data-testid="stButton"]>button:hover,
+html body .stApp div.stButton>button:hover{
+  transform:scale(1.05) translateY(-3px)!important;
+  filter:brightness(1.15)!important;
+  border-color:rgba(180,240,255,.95)!important}
+"""
+    hero = """
+<div class="lp-center">
+  <h1 class="lp-headline">5G Network Slicing<br><span class="cy">URLLC</span></h1>
+  <p class="lp-sub">Healthcare Simulation</p>
+</div>
+"""
+    return f"""<style>
+{_URLLC_LP_FONT_IMPORT}
+{_urllc_lp_chrome_viewport_css(wizard=False)}
+{landing_layout}
+{_URLLC_LP_SCENE_CSS}
+</style>
+{_URLLC_LP_SCENE_HTML}
+{hero}
+"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LANDING
+# ═══════════════════════════════════════════════════════════════════════════
+if st.session_state.phase == "landing":
+    st.html(_urllc_landing_lp_sthtml())
+
+    _, _mid, _ = st.columns([1, 1.6, 1])
+    with _mid:
+        if st.button("ENTER SIMULATION", type="primary", key="lp_enter", use_container_width=True):
+            st.session_state.phase = "wizard"
+            st.session_state.wiz_step = 0
+            st.rerun()
+    st.stop()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # RESULTS DASHBOARD
@@ -588,11 +855,29 @@ if st.session_state.phase == "boot":
 # ═══════════════════════════════════════════════════════════════════════════
 # WIZARD
 # ═══════════════════════════════════════════════════════════════════════════
+if st.session_state.phase == "wizard":
+    st.html(_urllc_wizard_lp_sthtml())
+
 st.markdown(
     """
     <style>
     section[data-testid="stSidebar"] { display: none !important; }
     [data-testid="collapsedControl"] { display: none !important; }
+
+    /* Single themed scrollbar on main (only if content exceeds viewport) */
+    section.main > div.block-container {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(34, 211, 238, 0.45) rgba(15, 23, 42, 0.6);
+    }
+    section.main > div.block-container::-webkit-scrollbar { width: 8px; }
+    section.main > div.block-container::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 4px;
+    }
+    section.main > div.block-container::-webkit-scrollbar-thumb {
+      background: linear-gradient(180deg, rgba(34,211,238,0.5), rgba(56,189,248,0.35));
+      border-radius: 4px;
+    }
 
     /* Centered presenter card feel */
     .wiz-outer .block-container { padding-top: 1.25rem !important; }
@@ -654,13 +939,17 @@ st.markdown(
       0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; }
     }
 
-    /* Card panel around centered column */
+    /* Card panel around centered column (above fixed radar layer) */
     div[data-testid="column"]:has(.wiz-card-anchor) {
-      background: linear-gradient(160deg, rgba(15,23,42,0.92) 0%, rgba(8,12,22,0.97) 100%);
+      position: relative;
+      z-index: 24;
+      background: linear-gradient(160deg, rgba(15,23,42,0.88) 0%, rgba(8,12,22,0.93) 100%);
       border: 1px solid rgba(56,189,248,0.22);
       border-radius: 20px;
       padding: 1.5rem 1.65rem 1.65rem 1.65rem !important;
       box-shadow: 0 4px 32px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.03) inset;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
     }
     </style>
     """,
@@ -750,13 +1039,13 @@ with wiz_mid:
             f"<b>Queue</b> {st.session_state.wiz_queue}</p>",
             unsafe_allow_html=True,
         )
-        c1, c2, _ = st.columns([0.42, 0.42, 1.6])
-        with c1:
-            if st.button("← Back", key="w3b", use_container_width=False):
+        c_back, c_run = st.columns([1, 1.15])
+        with c_back:
+            if st.button("← Back", key="w3b", use_container_width=True):
                 st.session_state.wiz_step = 2
                 st.rerun()
-        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
-        if st.button("SIMULATE", type="primary", key="w3sim", use_container_width=True):
-            st.session_state.phase = "boot"
-            st.rerun()
+        with c_run:
+            if st.button("SIMULATE", type="primary", key="w3sim", use_container_width=True):
+                st.session_state.phase = "boot"
+                st.rerun()
         st.caption("Runs both **Normal** and **URLLC slice** models with the same parameters.")
