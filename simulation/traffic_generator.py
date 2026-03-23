@@ -18,6 +18,12 @@ SIZE_RANGES = {
     "IoT": (2, 6),      # sensor — medium
 }
 
+INTENSITY_FACTORS = {
+    "low": 1.25,
+    "medium": 1.00,
+    "high": 0.62,
+}
+
 
 def inter_arrival_time(load: float, rng: random.Random) -> float:
     """
@@ -29,19 +35,52 @@ def inter_arrival_time(load: float, rng: random.Random) -> float:
     return rng.expovariate(1.0 / mean_gap)
 
 
+def inter_arrival_time_profiled(
+    load: float,
+    rng: random.Random,
+    *,
+    traffic_intensity: str = "medium",
+    burst_active: bool = False,
+) -> float:
+    """
+    Inter-arrival with scenario profile and optional burst pressure.
+
+    - traffic_intensity controls baseline congestion pressure.
+    - burst_active shrinks the mean gap further for short spikes.
+    """
+    load = max(0.1, min(1.0, load))
+    base_gap = 0.18 - 0.14 * load
+    factor = INTENSITY_FACTORS.get(traffic_intensity, 1.0)
+    mean_gap = base_gap * factor
+    if burst_active:
+        mean_gap *= 0.45
+    mean_gap = max(0.012, mean_gap)
+    return rng.expovariate(1.0 / mean_gap)
+
+
 def packet_stream(
     env_time_start: float,
     sim_duration: float,
     load: float,
+    traffic_intensity: str = "medium",
+    burst_enabled: bool = False,
     seed: int | None = None,
 ) -> Iterator[Tuple[float, Packet]]:
     rng = random.Random(seed)
-    t = 0.0
+    t = float(env_time_start)
     pid = 0
+    burst_period = 8.0
+    burst_duration = 1.5
     while t < sim_duration:
         ptype = rng.choices(TYPES, weights=PROBS, k=1)[0]
         low, high = SIZE_RANGES[ptype]
         size = rng.randint(low, high)
         yield t, Packet(id=pid, packet_type=ptype, size=size, arrival_time=t)
         pid += 1
-        t += inter_arrival_time(load, rng)
+        in_burst = burst_enabled and ((t % burst_period) < burst_duration)
+        t += inter_arrival_time_profiled(
+            load,
+            rng,
+            traffic_intensity=traffic_intensity,
+            burst_active=in_burst,
+        )

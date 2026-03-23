@@ -17,6 +17,8 @@ def run_scenario(
     traffic_load: float,
     urllc_enabled: bool,
     max_queue: int = 12,
+    traffic_intensity: str = "medium",
+    burst_enabled: bool = False,
     seed: int | None = 42,
 ) -> Dict[str, Any]:
     """
@@ -32,6 +34,10 @@ def run_scenario(
         If True, URLLC slice uses priority scheduling on the bottleneck link.
     max_queue : int
         Maximum waiting packets before additional arrivals are dropped.
+    traffic_intensity : str
+        Scenario profile: "low", "medium", or "high".
+    burst_enabled : bool
+        Whether to inject periodic short burst windows.
     seed : int, optional
         Reproducible randomness for traffic and service jitter.
     """
@@ -40,6 +46,8 @@ def run_scenario(
         traffic_load=traffic_load,
         urllc_enabled=urllc_enabled,
         max_queue=max_queue,
+        traffic_intensity=traffic_intensity,
+        burst_enabled=burst_enabled,
         seed=seed,
     )
     return compute_metrics(packets, urllc_enabled=urllc_enabled)

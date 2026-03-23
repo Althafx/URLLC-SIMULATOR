@@ -12,11 +12,13 @@ PACKET_TYPES = ("URLLC", "eMBB", "IoT")
 
 def _latency_stats(latencies: List[float]) -> Dict[str, Optional[float]]:
     if not latencies:
-        return {"avg": None, "min": None, "max": None}
+        return {"avg": None, "min": None, "max": None, "jitter": None}
+    jitter = float(statistics.pstdev(latencies)) if len(latencies) > 1 else 0.0
     return {
         "avg": float(statistics.mean(latencies)),
         "min": float(min(latencies)),
         "max": float(max(latencies)),
+        "jitter": jitter,
     }
 
 
@@ -39,6 +41,7 @@ def metrics_for_subset(packets: List[Packet]) -> Dict[str, Any]:
         "avg_latency": stats["avg"],
         "min_latency": stats["min"],
         "max_latency": stats["max"],
+        "jitter": stats["jitter"],
     }
 
 

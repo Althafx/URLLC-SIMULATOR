@@ -88,5 +88,50 @@ def plotly_grouped_bar(
     return go.Figure(data=traces, layout=layout)
 
 
+def plotly_latency_condition_lines(normal_res: Dict[str, Any], heavy_res: Dict[str, Any]) -> go.Figure:
+    """
+    Single clean comparison chart:
+    latency per class under Normal vs Heavy traffic conditions.
+    """
+    conditions = ["Normal traffic", "Heavy traffic"]
+    fig = go.Figure()
+    for t in PACKET_TYPES:
+        n = normal_res["by_type"][t].get("avg_latency")
+        h = heavy_res["by_type"][t].get("avg_latency")
+        ys = [
+            float("nan") if n is None else float(n),
+            float("nan") if h is None else float(h),
+        ]
+        fig.add_trace(
+            go.Scatter(
+                x=conditions,
+                y=ys,
+                mode="lines+markers",
+                name=t,
+                line=dict(color=COLORS[t], width=3),
+                marker=dict(size=9, color=COLORS[t], line=dict(color=EDGES[t], width=1)),
+            )
+        )
+    fig.update_layout(
+        paper_bgcolor=BG,
+        plot_bgcolor=PANEL,
+        font=dict(family="Segoe UI, sans-serif", color=TEXT, size=12),
+        title=dict(text="<b>Latency by Traffic Condition</b>", font=dict(size=16, color=ACCENT), x=0.01),
+        xaxis=dict(title="Traffic condition", linecolor="#334155", tickfont=dict(color=TEXT), showgrid=False),
+        yaxis=dict(title="Latency (sim units)", gridcolor=GRID, linecolor="#334155", tickfont=dict(color=TEXT), rangemode="tozero"),
+        legend=dict(
+            orientation="h",
+            y=1.08,
+            x=0.5,
+            xanchor="center",
+            bgcolor="rgba(17,19,24,0.8)",
+            font=dict(color=TEXT, size=11),
+        ),
+        margin=dict(l=52, r=16, t=70, b=46),
+        hoverlabel=dict(bgcolor="#1e293b"),
+    )
+    return fig
+
+
 def plotly_chart_config() -> dict:
     return {"displayModeBar": False}

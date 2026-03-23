@@ -30,19 +30,23 @@ def _should_drop(
     load: float,
     occupancy: float,
     urllc_enabled: bool,
+    traffic_intensity: str,
     rng: random.Random,
 ) -> bool:
     """
     Probabilistic congestion drop when queue occupancy is high.
     URLLC packets are protected when slicing is on.
     """
-    if occupancy < 0.5:
+    if occupancy < 0.45:
         return False
-    base_p = 0.20 * load * occupancy
-    if urllc_enabled and packet.packet_type == "URLLC":
-        base_p *= 0.05  # almost never dropped
-    elif not urllc_enabled and packet.packet_type == "URLLC":
-        base_p *= 1.3   # treated same as everything else
+    intensity_mult = {"low": 0.75, "medium": 1.0, "high": 1.45}.get(traffic_intensity, 1.0)
+    base_p = (0.10 + 0.35 * load * occupancy) * intensity_mult
+    if urllc_enabled:
+        class_mult = {"URLLC": 0.30, "eMBB": 1.00, "IoT": 1.35}.get(packet.packet_type, 1.0)
+    else:
+        class_mult = {"URLLC": 1.00, "eMBB": 1.05, "IoT": 1.15}.get(packet.packet_type, 1.0)
+    base_p *= class_mult
+    base_p = min(0.98, max(0.0, base_p))
     return rng.random() < base_p
 
 
@@ -51,6 +55,8 @@ def run_network_simulation(
     traffic_load: float,
     urllc_enabled: bool,
     max_queue: int = 8,
+    traffic_intensity: str = "medium",
+    burst_enabled: bool = False,
     seed: int | None = 42,
 ) -> List[Packet]:
     rng = random.Random((seed or 0) + 1)
@@ -78,7 +84,7 @@ def run_network_simulation(
                 return
 
         # Congestion drop
-        if _should_drop(pkt, traffic_load, occupancy, urllc_enabled, rng):
+        if _should_drop(pkt, traffic_load, occupancy, urllc_enabled, traffic_intensity, rng):
             pkt.dropped = True
             pkt.drop_reason = "congestion"
             results.append(pkt)
@@ -102,7 +108,14 @@ def run_network_simulation(
         results.append(pkt)
 
     stream_seed = seed if seed is not None else 0
-    for arrival_t, pkt in packet_stream(0.0, sim_time, traffic_load, seed=stream_seed):
+    for arrival_t, pkt in packet_stream(
+        0.0,
+        sim_time,
+        traffic_load,
+        traffic_intensity=traffic_intensity,
+        burst_enabled=burst_enabled,
+        seed=stream_seed,
+    ):
         def arrival_process(t: float = arrival_t, p: Packet = pkt):
             yield env.timeout(max(0.0, t - env.now))
             env.process(handle_packet(p))

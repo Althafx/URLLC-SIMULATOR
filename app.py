@@ -15,6 +15,7 @@ from analysis.graphs import (
     mode_labels,
     plotly_chart_config,
     plotly_grouped_bar,
+    plotly_latency_condition_lines,
 )
 from simulation.main import run_scenario
 
@@ -36,6 +37,40 @@ def _fmt_loss_pct(rate: float) -> str:
 
 def _fmt_reliability_pct(pct: float) -> str:
     return f"{pct:.0f}%"
+
+
+def _fmt_jitter(value: float | None) -> str:
+    if value is None:
+        return "—"
+    return f"{float(value):.3f} {LATENCY_UNIT}"
+
+
+def _build_tradeoff_observation(normal_res: dict, heavy_res: dict) -> str:
+    """Dynamic one-line observation for heavy-load trade-off."""
+    u_n = normal_res["by_type"]["URLLC"]
+    u_h = heavy_res["by_type"]["URLLC"]
+    e_h = heavy_res["by_type"]["eMBB"]
+    i_h = heavy_res["by_type"]["IoT"]
+    ln = u_n.get("avg_latency") or 0.0
+    lh = u_h.get("avg_latency") or 0.0
+    urllc_rel = float(u_h.get("reliability_pct", 0.0))
+    embb_rel = float(e_h.get("reliability_pct", 0.0))
+    iot_rel = float(i_h.get("reliability_pct", 0.0))
+    if ln > 0:
+        lat_jump = ((lh - ln) / ln) * 100.0
+    else:
+        lat_jump = 0.0
+    if urllc_rel >= 90.0 and lat_jump <= 35.0 and (embb_rel < urllc_rel or iot_rel < urllc_rel):
+        return (
+            f"Under heavy traffic, URLLC keeps comparatively stable latency "
+            f"(~{lat_jump:.0f}% change) and higher reliability ({urllc_rel:.1f}%), while eMBB/IoT drop to "
+            f"{embb_rel:.1f}%/{iot_rel:.1f}% reliability, showing a fairness vs performance trade-off."
+        )
+    return (
+        f"Under heavy traffic, all classes degrade; URLLC remains relatively better "
+        f"({urllc_rel:.1f}% reliability) while lower-priority classes fall further "
+        f"(eMBB {embb_rel:.1f}%, IoT {iot_rel:.1f}%)."
+    )
 
 
 def _traffic_class_matrix_html(enable_urllc: bool, res_normal: dict, res_urllc: dict) -> str:
@@ -100,7 +135,7 @@ def _traffic_class_matrix_html(enable_urllc: bool, res_normal: dict, res_urllc: 
         f"{thead}<tbody>{''.join(rows_html)}</tbody></table>"
         '<p class="tc-foot">Average latency = mean delay for successfully delivered packets. '
         f"Latency uses the model&rsquo;s <b>simulation time axis</b> ({LATENCY_UNIT}), the same unit as service and wait times in SimPy &mdash; "
-        "not wall-clock milliseconds. Loss and delivery are % of all packets in that class.</p>"
+        "not wall-clock time. Loss and delivery are % of all packets in that class.</p>"
         "</div>"
     )
 
@@ -116,6 +151,8 @@ if "wiz_load" not in st.session_state:
     st.session_state.wiz_load = 0.6
 if "wiz_queue" not in st.session_state:
     st.session_state.wiz_queue = 8
+if "wiz_intensity" not in st.session_state:
+    st.session_state.wiz_intensity = "medium"
 
 st.set_page_config(
     page_title="URLLC 5G Simulation",
@@ -128,7 +165,14 @@ def _reset_wizard() -> None:
     """Clear results and return to the landing page (full intro flow)."""
     st.session_state.phase = "landing"
     st.session_state.wiz_step = 0
-    for k in ("res_normal", "res_urllc"):
+    for k in (
+        "res_normal",
+        "res_urllc",
+        "res_cond_normal",
+        "res_cond_heavy",
+        "res_cond_normal_noslice",
+        "res_cond_heavy_noslice",
+    ):
         st.session_state.pop(k, None)
 
 
@@ -223,7 +267,7 @@ def _demo_assets():
         <animateMotion dur="3.2s" repeatCount="indefinite" begin="0.8s"
           path="M 96 88 C 180 42, 260 42, 344 88"/>
       </circle>
-      <text x="220" y="152" text-anchor="middle" class="demo-lat demo-lat--norm">~100+ ms</text>
+      <text x="220" y="152" text-anchor="middle" class="demo-lat demo-lat--norm">~100+ sim units</text>
       <text x="220" y="168" text-anchor="middle" class="demo-foot">Higher delay · commands not prioritized</text>
     </svg>
   </div>
@@ -272,7 +316,7 @@ def _demo_assets():
         <animateMotion dur="1.35s" repeatCount="indefinite" rotate="auto"
           path="M 96 88 C 180 42, 260 42, 344 88"/>
       </circle>
-      <text x="220" y="152" text-anchor="middle" class="demo-lat demo-lat--urllc">&lt;1 ms</text>
+      <text x="220" y="152" text-anchor="middle" class="demo-lat demo-lat--urllc">&lt;1 sim unit</text>
       <text x="220" y="168" text-anchor="middle" class="demo-foot">Lower latency · reliable control channel</text>
     </svg>
   </div>
@@ -332,11 +376,21 @@ _URLLC_LP_SCENE_CSS = """
 /* ── Radar sweep ── */
 .lp-sweep{
   position:absolute;top:50%;left:50%;
-  width:70vmax;height:70vmax;
-  transform-origin:0% 0%;
-  background:conic-gradient(from 0deg,transparent 268deg,rgba(0,220,255,.055) 360deg);
+  width:135vmax;height:135vmax;
+  transform:translate(-50%,-50%) rotate(0deg);
+  transform-origin:50% 50%;
+  border-radius:50%;
+  background:conic-gradient(
+    from 0deg,
+    transparent 0deg 312deg,
+    rgba(0,220,255,.06) 348deg,
+    rgba(0,220,255,.10) 360deg
+  );
   animation:sweepRot 6s linear infinite;z-index:2}
-@keyframes sweepRot{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes sweepRot{
+  from{transform:translate(-50%,-50%) rotate(0deg)}
+  to{transform:translate(-50%,-50%) rotate(360deg)}
+}
 
 /* ── Cross-hair ── */
 .lp-cross{position:absolute;inset:0;pointer-events:none}
@@ -608,14 +662,22 @@ if st.session_state.phase == "results":
 
     res_normal = st.session_state.res_normal
     res_urllc = st.session_state.res_urllc
+    res_cond_normal = st.session_state.res_cond_normal
+    res_cond_heavy = st.session_state.res_cond_heavy
+    res_cond_normal_noslice = st.session_state.res_cond_normal_noslice
+    res_cond_heavy_noslice = st.session_state.res_cond_heavy_noslice
     d, L, q = st.session_state.wiz_dur, st.session_state.wiz_load, st.session_state.wiz_queue
+    intensity = str(st.session_state.wiz_intensity)
 
     cfg = plotly_chart_config()
 
     top_l, top_r = st.columns([1, 1])
     with top_l:
         st.title("URLLC slice for remote healthcare")
-        st.caption(f"Results · duration **{d}** · load **{L:.2f}** · queue **{q}**")
+        st.caption(
+            f"Results · duration **{d}** · load **{L:.2f}** · queue **{q}** · "
+            f"intensity **{intensity.title()}**"
+        )
     with top_r:
         st.write("")
         st.write("")
@@ -625,13 +687,6 @@ if st.session_state.phase == "results":
 
     show_anim = st.toggle("Show Kerala → Delhi link animation", value=False)
     enable_urllc = st.toggle("Enable URLLC", value=False)
-
-    results_list_cmp = [res_normal, res_urllc] if enable_urllc else [res_normal]
-    tab_cmp = comparison_table(results_list_cmp)
-    cats_cmp = mode_labels(results_list_cmp)
-    tab_u_only = comparison_table([res_urllc])
-    cats_u = mode_labels([res_urllc])
-    key_base = f"{d}_{L}_{q}_u{int(enable_urllc)}"
 
     _demo_css, _panel_norm, _panel_urllc = _demo_assets()
     if show_anim:
@@ -647,6 +702,49 @@ if st.session_state.phase == "results":
         st.markdown(_demo_css + '<div class="surgery-dual-wrap">' + body + "</div>", unsafe_allow_html=True)
         if not enable_urllc:
             st.caption("Turn on **Enable URLLC** to add the priority-link (URLLC slice) panel beside the normal link.")
+
+    cond_normal = res_cond_normal if enable_urllc else res_cond_normal_noslice
+    cond_heavy = res_cond_heavy if enable_urllc else res_cond_heavy_noslice
+    cond_key = "urllc_on" if enable_urllc else "normal_only"
+
+    st.subheader("Normal vs heavy traffic")
+    st.caption(
+        "Single chart: latency for URLLC / eMBB / IoT under normal and heavy conditions "
+        f"({'URLLC enabled' if enable_urllc else 'no slice mode'})."
+    )
+    st.plotly_chart(
+        plotly_latency_condition_lines(cond_normal, cond_heavy),
+        use_container_width=True,
+        config=cfg,
+        key=f"lat_cond_{cond_key}_{d}_{L}_{q}_{intensity}",
+    )
+    st.info(_build_tradeoff_observation(cond_normal, cond_heavy))
+
+    summary_rows = []
+    for t in ("URLLC", "eMBB", "IoT"):
+        bn = cond_normal["by_type"][t]
+        bh = cond_heavy["by_type"][t]
+        summary_rows.append(
+            {
+                "Class": t,
+                "Sent (normal)": int(bn["total_packets"]),
+                "Dropped (normal)": int(bn["dropped_packets"]),
+                "Reliability (normal)": f"{bn['reliability_pct']:.1f}%",
+                "Sent (heavy)": int(bh["total_packets"]),
+                "Dropped (heavy)": int(bh["dropped_packets"]),
+                "Reliability (heavy)": f"{bh['reliability_pct']:.1f}%",
+                "Jitter (heavy)": _fmt_jitter(bh.get("jitter")),
+            }
+        )
+    st.caption("Packet loss and reliability by class under normal vs heavy traffic.")
+    st.table(summary_rows)
+
+    results_list_cmp = [res_normal, res_urllc] if enable_urllc else [res_normal]
+    tab_cmp = comparison_table(results_list_cmp)
+    cats_cmp = mode_labels(results_list_cmp)
+    tab_u_only = comparison_table([res_urllc])
+    cats_u = mode_labels([res_urllc])
+    key_base = f"{d}_{L}_{q}_u{int(enable_urllc)}"
 
     n_ul = res_normal["by_type"]["URLLC"]
     u_ul = res_urllc["by_type"]["URLLC"]
@@ -846,9 +944,64 @@ if st.session_state.phase == "boot":
     d = float(st.session_state.wiz_dur)
     L = float(st.session_state.wiz_load)
     q = int(st.session_state.wiz_queue)
+    intensity = str(st.session_state.wiz_intensity)
+    burst_on = intensity == "high"
     time.sleep(1.35)
-    st.session_state.res_normal = run_scenario(d, L, False, q, DEFAULT_SEED)
-    st.session_state.res_urllc = run_scenario(d, L, True, q, DEFAULT_SEED)
+    st.session_state.res_normal = run_scenario(
+        d,
+        L,
+        False,
+        q,
+        traffic_intensity=intensity,
+        burst_enabled=burst_on,
+        seed=DEFAULT_SEED,
+    )
+    st.session_state.res_urllc = run_scenario(
+        d,
+        L,
+        True,
+        q,
+        traffic_intensity=intensity,
+        burst_enabled=burst_on,
+        seed=DEFAULT_SEED,
+    )
+    # Dedicated condition pair for the required single graph.
+    st.session_state.res_cond_normal = run_scenario(
+        d,
+        L,
+        True,
+        q,
+        traffic_intensity="medium",
+        burst_enabled=False,
+        seed=DEFAULT_SEED,
+    )
+    st.session_state.res_cond_heavy = run_scenario(
+        d,
+        L,
+        True,
+        q,
+        traffic_intensity="high",
+        burst_enabled=True,
+        seed=DEFAULT_SEED,
+    )
+    st.session_state.res_cond_normal_noslice = run_scenario(
+        d,
+        L,
+        False,
+        q,
+        traffic_intensity="medium",
+        burst_enabled=False,
+        seed=DEFAULT_SEED,
+    )
+    st.session_state.res_cond_heavy_noslice = run_scenario(
+        d,
+        L,
+        False,
+        q,
+        traffic_intensity="high",
+        burst_enabled=True,
+        seed=DEFAULT_SEED,
+    )
     st.session_state.phase = "results"
     st.rerun()
 
@@ -962,7 +1115,7 @@ with wiz_mid:
     st.markdown('<span class="wiz-card-anchor"></span>', unsafe_allow_html=True)
     step = st.session_state.wiz_step
     dots_html = "".join(
-        f'<span class="wiz-dot{" wiz-dot--on" if i == step else ""}"></span>' for i in range(4)
+        f'<span class="wiz-dot{" wiz-dot--on" if i == step else ""}"></span>' for i in range(5)
     )
     st.markdown(f'<div class="wiz-dots">{dots_html}</div>', unsafe_allow_html=True)
 
@@ -1011,14 +1164,12 @@ with wiz_mid:
                 st.rerun()
 
     elif step == 2:
-        st.markdown("### Step 3 — Queue size")
-        st.session_state.wiz_queue = st.slider(
-            "Max waiting packets at the link",
-            min_value=3,
-            max_value=20,
-            value=int(st.session_state.wiz_queue),
-            step=1,
-            key="slider_queue",
+        st.markdown("### Step 3 — Traffic intensity")
+        st.session_state.wiz_intensity = st.selectbox(
+            "Traffic intensity profile",
+            options=["low", "medium", "high"],
+            index=["low", "medium", "high"].index(str(st.session_state.wiz_intensity)),
+            help="High intensity injects bursty spikes and stronger congestion pressure.",
         )
         c1, c2, _ = st.columns([0.42, 0.42, 1.6])
         with c1:
@@ -1031,21 +1182,42 @@ with wiz_mid:
                 st.rerun()
 
     elif step == 3:
-        st.markdown("### Step 4 — Run simulation")
+        st.markdown("### Step 4 — Queue size")
+        st.session_state.wiz_queue = st.slider(
+            "Max waiting packets at the link",
+            min_value=3,
+            max_value=20,
+            value=int(st.session_state.wiz_queue),
+            step=1,
+            key="slider_queue",
+        )
+        c1, c2, _ = st.columns([0.42, 0.42, 1.6])
+        with c1:
+            if st.button("← Back", key="w3b", use_container_width=False):
+                st.session_state.wiz_step = 2
+                st.rerun()
+        with c2:
+            if st.button("Next →", type="secondary", key="w3n", use_container_width=False):
+                st.session_state.wiz_step = 4
+                st.rerun()
+
+    elif step == 4:
+        st.markdown("### Step 5 — Run simulation")
         st.markdown(
             f'<p style="color:#cbd5e1;font-size:0.9rem;line-height:1.55;margin:0.5rem 0 1rem 0;">'
             f"<b>Duration</b> {st.session_state.wiz_dur} · "
             f"<b>Load</b> {st.session_state.wiz_load:.2f} · "
-            f"<b>Queue</b> {st.session_state.wiz_queue}</p>",
+            f"<b>Queue</b> {st.session_state.wiz_queue} · "
+            f"<b>Intensity</b> {str(st.session_state.wiz_intensity).title()}</p>",
             unsafe_allow_html=True,
         )
         c_back, c_run = st.columns([1, 1.15])
         with c_back:
-            if st.button("← Back", key="w3b", use_container_width=True):
-                st.session_state.wiz_step = 2
+            if st.button("← Back", key="w4b", use_container_width=True):
+                st.session_state.wiz_step = 3
                 st.rerun()
         with c_run:
-            if st.button("SIMULATE", type="primary", key="w3sim", use_container_width=True):
+            if st.button("SIMULATE", type="primary", key="w4sim", use_container_width=True):
                 st.session_state.phase = "boot"
                 st.rerun()
         st.caption("Runs both **Normal** and **URLLC slice** models with the same parameters.")
