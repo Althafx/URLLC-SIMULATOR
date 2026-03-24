@@ -102,7 +102,7 @@ Prints a **short JSON summary** (no full packet dump):
 python -m simulation.main
 ```
 
-(Run from inside `urllc-sim` with dependencies installed.)
+(Run from inside `URLLC-SIMULATOR` with dependencies installed.)
 
 ---
 
