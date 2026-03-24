@@ -1,86 +1,118 @@
-# URLLC Slice for Remote Healthcare (5G Network Simulation)
+# URLLC Healthcare Simulation
 
-Academic **Python simulation** of a congested 5G-style transport link serving a **remote robotic surgery** story: a doctor in **Kerala** operates on a patient in **Delhi**. The model is **not** a real 5G implementation; it uses **SimPy** to show why **URLLC (Ultra-Reliable Low-Latency Communication)** style **priority** matters when video (**eMBB**) and **IoT** sensors compete for the same bottleneck.
+A **simple, educational** simulation of a **busy 5G-style link** shared by three traffic types:
 
-## What the simulation does
+| Type   | Idea in this project        |
+|--------|-----------------------------|
+| **URLLC** | Time-critical control (e.g. surgery commands) |
+| **eMBB**  | Heavy traffic (e.g. video) |
+| **IoT**   | Sensors / telemetry        |
 
-- Generates three traffic types with a fixed random mix: **URLLC 20%**, **eMBB 50%**, **IoT 30%**.
-- Sends packets through a **single-server queue** with a **finite buffer**.
-- **Mode 1 — Normal network:** FIFO `Resource` (no class-based priority).
-- **Mode 2 — URLLC slice:** `PriorityResource` so **URLLC** is served before **eMBB** and **IoT**.
-- Applies **packet loss** when the **queue is full** and under **overload** (probabilistic when the queue is stressed).
-- Reports **latency** (arrival → end of service), **loss rate**, and **reliability** (% delivered).
+**What you learn:** when the link is crowded, **who gets served first** changes **latency**, **packet loss**, **reliability**, and **jitter**. Turning on a **URLLC-style priority slice** helps critical traffic — often at the cost of lower-priority traffic on the **same** link.
 
-## Project layout
+> This is **not** a real 5G or radio simulator. It is a **queue + scheduler** model built with **SimPy**, shown in a **Streamlit** app.
 
-```
-urllc-healthcare-simulation/
-├── simulation/
-│   ├── main.py              # run_scenario(...) entry point
-│   ├── network.py           # SimPy queue + link
-│   ├── packet.py            # Packet dataclass + priorities
-│   ├── traffic_generator.py # arrivals + sizes
-│   ├── scheduler.py         # priority mapping
-│   ├── metrics.py           # aggregates
-├── analysis/
-│   ├── graphs.py            # matplotlib figures
-├── app.py                   # Streamlit UI
-├── requirements.txt
-└── README.md
-```
+---
 
-## Setup
+## Run the app (quick)
 
-1. Install **Python 3.10+** (3.11 recommended).
-2. Create a virtual environment (optional but good practice):
+1. **Python 3.10+** installed.
 
-   ```bash
+2. Open a terminal in this folder (`urllc-sim`).
+
+3. (Recommended) Virtual environment:
+
+   **Windows**
+
+   ```powershell
    python -m venv .venv
-   .venv\Scripts\activate
+   .\.venv\Scripts\activate
+   pip install -r requirements.txt
+   streamlit run app.py
    ```
 
-3. Install dependencies:
+   **macOS / Linux**
 
    ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
    pip install -r requirements.txt
+   streamlit run app.py
    ```
 
-## How to run
+4. Your browser opens (usually **http://localhost:8501**).
 
-From the `urllc-healthcare-simulation` directory:
+**No Streamlit?** After `pip install -r requirements.txt`, the command above should work.
 
-```bash
-streamlit run app.py
+---
+
+## What you do in the app
+
+1. **Landing** — Enter the simulation.
+2. **Wizard** — Set:
+   - simulation duration  
+   - traffic load  
+   - **traffic intensity** (low / medium / high, with bursts on **high**)  
+   - queue size  
+3. **SIMULATE** — The app runs the models and opens **Results**.
+4. **Results** — Charts, tables, optional Kerala → Delhi animation, toggles for **URLLC** views.
+
+**← New simulation** goes back to the landing page.
+
+---
+
+## What the simulation actually does
+
+- **Traffic mix:** about **20% URLLC**, **50% eMBB**, **30% IoT** (random per packet).
+- **One bottleneck:** single server, **finite queue**, drops when full or under congestion.
+- **Two scheduling modes** (same random seed for a fair comparison):
+  - **Normal:** first-come-first-served (`simpy.Resource`).
+  - **URLLC slice on:** priority order **URLLC → eMBB → IoT** (`simpy.PriorityResource`).
+- **Heavy traffic:** higher intensity + optional **burst** arrivals; **normal vs heavy** is also compared in one chart.
+- **Metrics:** latency is in **simulation time units** (not real milliseconds), plus loss, reliability (% delivered), and **jitter** (variation in latency).
+
+---
+
+## Project folders (where to look)
+
+```
+urllc-sim/
+├── app.py                 # Streamlit UI (landing → wizard → results)
+├── simulation/
+│   ├── main.py            # run_scenario(...) — entry for one run
+│   ├── network.py         # SimPy queue + link + drops
+│   ├── packet.py          # Packet + priority numbers
+│   ├── traffic_generator.py
+│   ├── scheduler.py
+│   └── metrics.py         # latency, loss, reliability, jitter
+├── analysis/
+│   └── graphs.py          # Plotly charts
+├── requirements.txt
+├── README.md              # this file
+└── MSC_CLASSROOM_GUIDE.md # teaching / presentation notes (optional)
 ```
 
-**CLI smoke test** (prints summary JSON without the full packet list):
+---
+
+## Run without the browser (quick check)
+
+Prints a **short JSON summary** (no full packet dump):
 
 ```bash
 python -m simulation.main
 ```
 
-## Using the dashboard
+(Run from inside `urllc-sim` with dependencies installed.)
 
-- **Simulation time** — longer runs produce smoother statistics.
-- **Traffic load** — increase toward `1.0` to create **congestion** (queues build, latency grows, drops appear).
-- **Compare Normal vs URLLC slice** — runs the **same random seed** twice so you can contrast **FIFO** vs **priority** fairly.
-- Charts show **average latency**, **packet loss %**, and **reliability %** **per traffic class**.
+---
 
-## Example outcome (typical pattern)
+## Tech stack
 
-With **high load** and a **tight queue**, you should see:
+- **Python**
+- **Streamlit** — UI
+- **SimPy** — discrete-event simulation
+- **Plotly** — charts
 
-- **URLLC** packets with **lower average latency** when the slice is **enabled**.
-- **eMBB / IoT** often wait longer when URLLC is prioritized (expected trade-off on a shared link).
+---
 
-Exact numbers depend on **seed**, **load**, and **queue size** — that is normal for event-driven simulations.
-
-## Academic framing (viva / report)
-
-- **URLLC** = strict latency and reliability targets for **control loops** (here: surgery commands).
-- **Network slicing** = logical separation; here modeled only as **scheduler priority** + **overload behavior** on one hop.
-- **Limitations:** one bottleneck, no radio channel, no TCP, no real 3GPP timers — scope stays **pedagogical**.
-
-## License
-
-Educational use. Adapt freely for coursework with attribution.
+-
